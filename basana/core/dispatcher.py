@@ -27,7 +27,6 @@ import signal
 
 from . import dt, errors, event, helpers, logs
 
-
 logger = logging.getLogger(__name__)
 EventHandler = Callable[[event.Event], Awaitable[Any]]
 IdleHandler = Callable[[], Awaitable[Any]]
@@ -80,7 +79,7 @@ class EventMultiplexer:
         self._prefetched_events.setdefault(source)
 
     def peek_next_event_dt(self) -> Optional[datetime.datetime]:
-        self._prefetch()
+        self._prefetch()    # fetch next event from each source
 
         next_dt = None
         prefetched_events = [evnt for evnt in self._prefetched_events.values() if evnt]
@@ -92,7 +91,7 @@ class EventMultiplexer:
         ret_source: Optional[event.EventSource] = None
         ret_event: Optional[event.Event] = None
 
-        # Find the next event to return, this is, the oldest one that is <= max_dt.
+        # Find the next event to return, this is, the earliest one that is <= max_dt.
         for source, evnt in self._prefetched_events.items():
             # Prefetch the event for sorting purposes.
             if evnt is None:
@@ -111,12 +110,14 @@ class EventMultiplexer:
 
     def pop_while(self, max_dt: datetime.datetime) -> Generator[Tuple[event.EventSource, event.Event], None, None]:
         while None not in (src_and_event := self.pop(max_dt)):
-            yield (cast(event.EventSource, src_and_event[0]), cast(event.Event, src_and_event[1]))
+            yield cast(event.EventSource, src_and_event[0]), cast(event.Event, src_and_event[1])
+        # src_and_event = self.pop(max_dt)
+        # while None not in src_and_event:
+        #     yield cast(event.EventSource, src_and_event[0]), cast(event.Event, src_and_event[1])
+        #     src_and_event = self.pop(max_dt)
 
     def _prefetch(self):
-        sources_to_pop = [
-            source for source, event in self._prefetched_events.items() if event is None
-        ]
+        sources_to_pop = [source for source, event in self._prefetched_events.items() if event is None]
         for source in sources_to_pop:
             if event := source.pop():
                 self._prefetched_events[source] = event
@@ -373,9 +374,9 @@ class BacktestingDispatcher(EventDispatcher):
         # Pop events, push them into the task pool, and wait those to finish executing.
         self._last_dt = dt
         for source, evnt in self._event_mux.pop_while(dt):
-            await self._handlers_task_pool.push(
-                self._dispatch_event(EventDispatch(event=evnt, handlers=self._event_handlers.get(source, [])))
-            )
+            print(source, evnt)
+            event_dispatch = EventDispatch(event=evnt, handlers=self._event_handlers.get(source, []))
+            await self._handlers_task_pool.push(self._dispatch_event(event_dispatch))
         await self._handlers_task_pool.wait()
 
 

@@ -25,7 +25,6 @@ import aiohttp
 
 from . import event, helpers, logs
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -41,6 +40,7 @@ class ChannelEventSource(event.FifoQueueEventSource):
 
 class WebSocketClient(event.Producer, metaclass=abc.ABCMeta):
     """"Base class for channel based web socket clients."""
+
     def __init__(
             self, url: str, session: Optional[aiohttp.ClientSession] = None, config_overrides: dict = {},
             heartbeat: float = 30
@@ -92,8 +92,13 @@ class WebSocketClient(event.Producer, metaclass=abc.ABCMeta):
             try:
                 logger.debug(logs.StructuredMessage("Connecting websocket", src=self, url=self._url))
                 last_connect_ts = time.time()
+
+                # proxy = None
+                proxy = "http://127.0.0.1:7890"
+                logger.warning(f"PROXY {"Enable" if proxy else "DISABLE"}")
+
                 async with helpers.use_or_create_session(session=self._session) as session, \
-                        session.ws_connect(self._url, heartbeat=self._heartbeat) as ws_cli, \
+                        session.ws_connect(self._url, heartbeat=self._heartbeat, proxy=proxy) as ws_cli, \
                         helpers.TaskGroup() as tg:
 
                     # Turn this off since we just reconnected.

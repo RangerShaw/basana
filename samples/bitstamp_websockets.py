@@ -52,7 +52,7 @@ async def on_order_event(event: bitstamp_exchange.OrderEvent):
 
 
 async def main():
-    logging.basicConfig(level=logging.INFO, format="[%(asctime)s %(levelname)s] %(message)s")
+    logging.basicConfig(level=logging.DEBUG, format="[%(asctime)s %(levelname)s] %(message)s")
     event_dispatcher = bs.realtime_dispatcher()
     exchange = bitstamp_exchange.Exchange(event_dispatcher)
 
@@ -61,10 +61,10 @@ async def main():
         bs.Pair("ETH", "USD"),
     ]
     for pair in pairs:
-        exchange.subscribe_to_bar_events(pair, 60, on_bar_event)
-        exchange.subscribe_to_order_book_events(pair, on_order_book_event)
+        exchange.subscribe_to_bar_events(pair, 1, on_bar_event)
+        # exchange.subscribe_to_order_book_events(pair, on_order_book_event)
         exchange.subscribe_to_public_trade_events(pair, on_trade_event)
-        exchange.subscribe_to_public_order_events(pair, on_order_event)
+        # exchange.subscribe_to_public_order_events(pair, on_order_event)
 
     await event_dispatcher.run()
 

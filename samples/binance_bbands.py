@@ -26,7 +26,7 @@ from samples.strategies import bbands
 
 
 async def main():
-    logging.basicConfig(level=logging.INFO, format="[%(asctime)s %(levelname)s] %(message)s")
+    logging.basicConfig(level=logging.DEBUG, format="[%(asctime)s %(levelname)s] %(message)s")
 
     event_dispatcher = bs.realtime_dispatcher()
     pair = bs.Pair("ETH", "USDT")
@@ -48,7 +48,7 @@ async def main():
     )
     # Connect the position manager to the strategy signals and to bar events just for logging.
     strategy.subscribe_to_trading_signals(position_mgr.on_trading_signal)
-    exchange.subscribe_to_bar_events(pair, "1m", position_mgr.on_bar_event)
+    exchange.subscribe_to_bar_events(pair, "1s", position_mgr.on_bar_event)
 
     await event_dispatcher.run()
 

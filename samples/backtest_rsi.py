@@ -32,13 +32,13 @@ from samples.strategies import rsi
 
 
 async def main():
-    logging.basicConfig(level=logging.INFO, format="[%(asctime)s %(levelname)s] %(message)s")
+    logging.basicConfig(level=logging.DEBUG, format="[%(asctime)s %(levelname)s] %(message)s")
 
     event_dispatcher = bs.backtesting_dispatcher()
-    pair = bs.Pair("BTC", "USD")
+    pair = bs.Pair("002717", "CNY")
     exchange = backtesting_exchange.Exchange(
         event_dispatcher,
-        initial_balances={"BTC": Decimal(0), "USD": Decimal(1200)}
+        initial_balances={"002717": Decimal(0), "CNY": Decimal(1000000)}
     )
     exchange.set_symbol_precision(pair.base_symbol, 8)
     exchange.set_symbol_precision(pair.quote_symbol, 2)
@@ -47,19 +47,19 @@ async def main():
     oversold_level = 30
     overbought_level = 70
     strategy = rsi.Strategy(event_dispatcher, 7, oversold_level, overbought_level)
-    exchange.subscribe_to_bar_events(pair, strategy.on_bar_event)
+    exchange.subscribe_to_bar_events(pair, strategy.on_bar_event) # generate trading signal if satisfy
 
     # Connect the position manager to different types of events. Borrowing is disabled in this example.
     position_mgr = position_manager.PositionManager(
         exchange, position_amount=Decimal(1000), quote_symbol=pair.quote_symbol, stop_loss_pct=Decimal(6),
         borrowing_disabled=True
     )
-    strategy.subscribe_to_trading_signals(position_mgr.on_trading_signal)
-    exchange.subscribe_to_bar_events(pair, position_mgr.on_bar_event)
-    exchange.subscribe_to_order_events(position_mgr.on_order_event)
+    strategy.subscribe_to_trading_signals(position_mgr.on_trading_signal) # log trading signal info, fulfill order
+    exchange.subscribe_to_bar_events(pair, position_mgr.on_bar_event) # log bar info, check loss
+    exchange.subscribe_to_order_events(position_mgr.on_order_event) # log order info
 
     # Load bars from the CSV file.
-    exchange.add_bar_source(csv.BarSource(pair, "bitstamp_btcusd_day.csv", "1d"))
+    exchange.add_bar_source(csv.BarSource(pair, "D:/LocalWork/basana/samples/day_002717.csv", "1d"))
 
     # Setup chart.
     chart = charts.LineCharts(exchange)

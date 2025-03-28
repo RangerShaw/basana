@@ -37,7 +37,7 @@ async def main():
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s %(levelname)s] %(message)s")
 
     event_dispatcher = bs.backtesting_dispatcher()
-    pair = bs.Pair("BTC", "USDT")
+    pair = bs.Pair("002717", "CNY")
     position_amount = Decimal(1000)
     stop_loss_pct = Decimal(5)
 
@@ -54,7 +54,7 @@ async def main():
     )
     exchange.set_symbol_precision(pair.base_symbol, 8)
     exchange.set_symbol_precision(pair.quote_symbol, 2)
-    exchange.add_bar_source(csv.BarSource(pair, "binance_btcusdt_day.csv", "1d"))
+    exchange.add_bar_source(csv.BarSource(pair, "day_002717.csv", "1d"))
 
     # Connect the strategy to the bar events from the exchange.
     strategy = bbands.Strategy(event_dispatcher, period=30, std_dev=2)
