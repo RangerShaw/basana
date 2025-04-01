@@ -13,7 +13,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+from datetime import timedelta
 from typing import cast, Any, Awaitable, Callable, Dict, Generator, List, Optional, Set, Tuple
 import abc
 import asyncio
@@ -79,7 +79,7 @@ class EventMultiplexer:
         self._prefetched_events.setdefault(source)
 
     def peek_next_event_dt(self) -> Optional[datetime.datetime]:
-        self._prefetch()    # fetch next event from each source
+        self._prefetch()  # fetch next event from each source
 
         next_dt = None
         prefetched_events = [evnt for evnt in self._prefetched_events.values() if evnt]
@@ -410,6 +410,7 @@ class RealtimeDispatcher(EventDispatcher):
     async def _dispatch_loop(self):
         while not self.stopped:
             now = dt.utc_now()
+            now += timedelta(seconds=1)  # TODO: [Ranto] Allow events a little later than now
             # Feed the task pool with scheduled jobs and events that are ready for processing.
             await asyncio.gather(
                 self._push_scheduled(now),
@@ -445,6 +446,7 @@ class RealtimeDispatcher(EventDispatcher):
                     "Events returned out of order", source=type(source), previous=prev_event_dt, current=evnt.when
                 ))
                 # TODO: Not ignoring out-of-order events should be an option.
+                # TODO: [Ranto] Not ignoring out-of-order events within certain period
                 continue
             self._prev_event_dt[source] = evnt.when
 

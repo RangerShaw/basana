@@ -40,7 +40,7 @@ async def main():
 
     # Connect the strategy to the bar events from the exchange.
     strategy = bbands.Strategy(event_dispatcher, period=20, std_dev=1.5)
-    exchange.subscribe_to_bar_events(pair, "1m", strategy.on_bar_event)
+    exchange.subscribe_to_bar_events(pair, "1s", strategy.on_bar_event)
 
     # We'll be using the spot account, so there will be no short positions opened.
     position_mgr = position_manager.SpotAccountPositionManager(
