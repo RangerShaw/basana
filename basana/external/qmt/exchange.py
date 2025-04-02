@@ -17,13 +17,16 @@
 from decimal import Decimal
 from typing import Dict, List, Optional, Tuple, Union
 import dataclasses
+from xtquant import xttrader, xtdata, xtconstant
+from xtquant.xttype import StockAccount
+from xtquant.xttrader import XtQuantTrader, XtQuantTraderCallback
 
 import aiohttp
+import datetime
 
 from . import client, helpers, order_book, trades, spot, cross_margin, isolated_margin, websocket_mgr
 from basana.core import bar, dispatcher, enums, token_bucket
 from basana.core.pair import Pair, PairInfo
-
 
 BarEventHandler = bar.BarEventHandler
 Error = client.Error
@@ -49,166 +52,170 @@ class PairInfoEx(PairInfo):
     permissions: List[str]
 
 
-class QmtExchange:
-    """A client for `Binance <https://www.binance.com/>`_ crypto currency exchange.
-
-    :param dispatcher: The event dispatcher.
-    :param api_key: An optional api key. If not set only public endpoints can be used.
-    :param api_secret: An optional api secret. If not set only public endpoints can be used.
-    :param session: An optional client session, in case you want to reuse connections.
-    :type session: aiohttp.ClientSession
-    :param tb: An optional token bucket limiter, in case you want to throttle requests.
-    :param config_overrides: An optional dictionary for overriding config settings.
-    """
+class QMTExchange:
+    """QMT A股交易所接口封装"""
 
     def __init__(
-            self, dispatcher: dispatcher.EventDispatcher, api_key: Optional[str] = None,
-            api_secret: Optional[str] = None, session: Optional[aiohttp.ClientSession] = None,
-            tb: Optional[token_bucket.TokenBucketLimiter] = None, config_overrides: dict = {}
+            self, xt_trader: XtQuantTrader, account: StockAccount, dispatcher: dispatcher.EventDispatcher,
+            config: dict = None
     ):
-        self._dispatcher = dispatcher
-        self._cli = client.APIClient(
-            api_key=api_key, api_secret=api_secret, session=session, tb=tb, config_overrides=config_overrides
+        self.xt_trader = xt_trader
+        self.account = account
+        self.dispatcher = dispatcher
+        self.config = config or {}
+        self._pair_info_cache: Dict[str, dict] = {}
+
+        # 行情订阅管理
+        self.subscribed_pairs = set()
+        self._setup_event_handlers()
+
+    def _setup_event_handlers(self):
+        """初始化事件处理器"""
+        xtdata.subscribe_whole_quote([], self._on_market_data)
+
+    # 行情订阅相关方法
+    def subscribe_to_bar_events(self, symbol: str, interval: str, event_handler: callable, flush_delay: float = 1):
+        """订阅K线数据"""
+        qmt_period = self._convert_period(interval)
+        xtdata.subscribe_quote(symbol, qmt_period, callback=event_handler)
+        self.subscribed_pairs.add(symbol)
+
+    def subscribe_to_order_book_events(self, symbol: str, event_handler: callable, depth: int = 10):
+        """订阅订单簿更新"""
+        # QMT Level2数据需要特殊处理
+        xtdata.subscribe_quote(symbol, 'order_book', callback=event_handler)
+
+    def subscribe_to_trade_events(self, symbol: str, event_handler: callable):
+        """订阅逐笔成交"""
+        xtdata.subscribe_quote(symbol, 'tick', callback=event_handler)
+
+    # 行情数据获取
+    async def get_bid_ask(self, symbol: str) -> Tuple[Decimal, Decimal]:
+        """获取当前最优买卖价"""
+        quote = xtdata.get_full_tick([symbol]).get(symbol, {})
+        return (
+            Decimal(str(quote.get('bidPrice', [0])[0])),
+            Decimal(str(quote.get('askPrice', [0])[0]))
         )
-        self._session = session
-        self._tb = tb
-        self._config_overrides = config_overrides
-        self._pair_info_cache: Dict[Pair, PairInfoEx] = {}
-        self._ws_mgr = websocket_mgr.WebsocketManager(
-            dispatcher, self._cli, session=session, config_overrides=config_overrides
+
+    async def get_pair_info(self, symbol: str) -> dict:
+        """获取证券基本信息"""
+        if symbol not in self._pair_info_cache:
+            detail = xtdata.get_instrument_detail(symbol)
+            self._pair_info_cache[symbol] = {
+                'base_precision': 2,  # 股票最小变动单位0.01元
+                'quote_precision': 2,
+                'min_order_volume': 100,  # 主板最小100股
+                'price_tick': 0.01
+            }
+        return self._pair_info_cache[symbol]
+
+    # 订单相关方法
+    async def create_order(
+            self, symbol: str, operation: int, amount: int, price_type: int = xtconstant.FIX_PRICE, price: float = None
+    ) -> str:
+        """创建股票订单"""
+        order = StockOrder()
+        order.stock_code = symbol
+        order.order_type = operation
+        order.order_volume = amount
+        order.price_type = price_type
+        order.price = price or 0.0
+
+        # 调用QMT交易接口
+        order_id = self.xt_trader.order_stock(
+            self.account, symbol, operation, amount,
+            price_type, price, "Strategy", "AutoOrder"
         )
+        return str(order_id)
 
-    def subscribe_to_bar_events(
-            self, pair: Pair, bar_duration: Union[int, str], event_handler: BarEventHandler,
-            skip_first_bar: bool = True, flush_delay: float = 1
-    ):
-        """
-        Registers an async callable that will be called when a new bar is available.
+    async def cancel_order(self, symbol: str, order_id: str) -> bool:
+        """取消订单"""
+        return self.xt_trader.cancel_order_stock(self.account, order_id) == 0
 
-        Works as defined in https://binance-docs.github.io/apidocs/spot/en/#kline-candlestick-streams but only closed
-        klines are reported.
+    async def get_order_info(self, symbol: str, order_id: str) -> dict:
+        """查询订单详情"""
+        order = self.xt_trader.query_stock_order(self.account, order_id)
+        return self._format_order(order)
 
-        :param pair: The trading pair.
-        :param bar_duration: The bar duration. One of 1s, 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1d, 3d, 1w, 1M.
-        :type bar_duration: str
-        :param event_handler: An async callable that receives a BarEvent.
-        :param skip_first_bar: Ignored. It will be removed in a future version.
-        :param flush_delay: Ignored. It will be removed in a future version.
-        """
-        # TODO: Deprecate support for bar_duration as int.
-        # TODO: Remove skip_first_bar and flush_delay.
-        interval = {
-            # Supporting interval as int for backwards compatibility reasons.
-            1: "1s",
-            60: "1m",
-            3 * 60: "3m",
-            5 * 60: "5m",
-            15 * 60: "15m",
-            30 * 60: "30m",
-            3600: "1h",
-            2 * 3600: "2h",
-            4 * 3600: "4h",
-            6 * 3600: "6h",
-            8 * 3600: "8h",
-            12 * 3600: "12h",
-            86400: "1d",
-            3 * 86400: "3d",
-            7 * 86400: "1w",
-            31 * 86400: "1M",
-            # Once support for interval as int is removed, this should be simplified.
-            "1s": "1s",
-            "1m": "1m",
-            "3m": "3m",
-            "5m": "5m",
-            "15m": "15m",
-            "30m": "30m",
-            "1h": "1h",
-            "2h": "2h",
-            "4h": "4h",
-            "6h": "6h",
-            "8h": "8h",
-            "12h": "12h",
-            "1d": "1d",
-            "3d": "3d",
-            "1w": "1w",
-            "1M": "1M",
-        }.get(bar_duration)
-        assert interval, "Invalid bar_duration"
+    # 账户信息查询
+    async def get_balance(self) -> dict:
+        """获取账户资金"""
+        asset = self.xt_trader.query_stock_asset(self.account)
+        return {
+            'cash': Decimal(str(asset.cash)),
+            'frozen': Decimal(str(asset.frozen_cash)),
+            'total': Decimal(str(asset.total_asset))
+        }
 
-        self._ws_mgr.subscribe_to_bar_events(pair, interval, event_handler)
+    async def get_positions(self) -> Dict[str, dict]:
+        """获取持仓信息"""
+        positions = self.xt_trader.query_stock_positions(self.account)
+        return {pos.stock_code: self._format_position(pos) for pos in positions}
 
-    def subscribe_to_order_book_events(
-            self, pair: Pair, event_handler: OrderBookEventHandler, depth: int = 10
-    ):
-        """
-        Registers an async callable that will be called every 1 second with the top bids/asks of the order book.
+    # 数据处理方法
+    def _format_order(self, order: StockOrder) -> dict:
+        """格式化订单信息"""
+        return {
+            'id': str(order.order_id),
+            'symbol': order.stock_code,
+            'amount': order.order_volume,
+            'filled': order.traded_volume,
+            'price': Decimal(str(order.price)),
+            'status': self._convert_order_status(order.order_status),
+            'side': 'BUY' if order.order_type == xtconstant.STOCK_BUY else 'SELL',
+            'timestamp': datetime.datetime.fromtimestamp(order.order_time / 1000)
+        }
 
-        Works as defined in https://binance-docs.github.io/apidocs/spot/en/#partial-book-depth-streams.
+    def _format_position(self, position) -> dict:
+        """格式化持仓信息"""
+        return {
+            'symbol': position.stock_code,
+            'amount': position.volume,
+            'frozen': position.frozen_volume,
+            'avg_price': Decimal(str(position.avg_price))
+        }
 
-        :param pair: The trading pair.
-        :param event_handler: An async callable that receives an OrderBookEvent.
-        :param depth: The order book depth. Valid values are: 5, 10, 20.
-        """
+    def _convert_period(self, interval: str) -> str:
+        """转换K线周期到QMT格式"""
+        period_map = {
+            '1m': '1m',
+            '5m': '5m',
+            '15m': '15m',
+            '30m': '30m',
+            '1h': '1h',
+            '1d': '1d'
+        }
+        return period_map.get(interval, '1d')
 
-        self._ws_mgr.subscribe_to_order_book_events(pair, event_handler, depth=depth)
+    def _convert_order_status(self, status: int) -> str:
+        """转换订单状态"""
+        status_map = {
+            48: 'SUBMITTED',  # 未报
+            49: 'PENDING',  # 待报
+            50: 'PARTIAL',  # 已报
+            56: 'FILLED',  # 已成
+            54: 'CANCELED'  # 已撤
+        }
+        return status_map.get(status, 'UNKNOWN')
 
-    def subscribe_to_trade_events(self, pair: Pair, event_handler: TradeEventHandler):
-        """
-        Registers an async callable that will be called for every new trade.
+    # 事件回调处理
+    def _on_market_data(self, data: dict):
+        """处理实时行情推送"""
+        for symbol, tick in data.items():
+            event = self._create_tick_event(symbol, tick)
+            self.dispatcher.dispatch(event)
 
-        Works as defined in https://binance-docs.github.io/apidocs/spot/en/#trade-streams.
-
-        :param pair: The trading pair.
-        :param event_handler: An async callable that receives a TradeEvent.
-        """
-
-        self._ws_mgr.subscribe_to_trade_events(pair, event_handler)
-
-    async def get_pair_info(self, pair: Pair) -> PairInfoEx:
-        """Returns information about a trading pair.
-
-        :param pair: The trading pair.
-        """
-        ret = self._pair_info_cache.get(pair)
-        if not ret:
-            exchange_info = await self._cli.get_exchange_info(helpers.pair_to_order_book_symbol(pair))
-            symbols = exchange_info["symbols"]
-            assert len(symbols) == 1, "More than 1 symbol found"
-            symbol_info = symbols[0]
-            price_filter = get_filter_from_symbol_info(symbol_info, "PRICE_FILTER")
-            assert price_filter, f"PRICE_FILTER not found for {pair}"
-            lot_size = get_filter_from_symbol_info(symbol_info, "LOT_SIZE")
-            assert lot_size, f"LOT_SIZE not found for {pair}"
-            ret = PairInfoEx(
-                base_precision=get_precision_from_step_size(lot_size["stepSize"]),
-                quote_precision=get_precision_from_step_size(price_filter["tickSize"]),
-                permissions=symbol_info.get("permissions")
-            )
-            self._pair_info_cache[pair] = ret
-        return ret
-
-    async def get_bid_ask(self, pair: Pair) -> Tuple[Decimal, Decimal]:
-        """Returns the current bid and ask price.
-
-        :param pair: The trading pair.
-        """
-        order_book = await self._cli.get_order_book(helpers.pair_to_order_book_symbol(pair), limit=1)
-        return Decimal(order_book["bids"][0][0]), Decimal(order_book["asks"][0][0])
-
-    @property
-    def spot_account(self) -> spot.Account:
-        """Returns the spot account."""
-        return spot.Account(self._cli.spot_account, self._ws_mgr)
-
-    @property
-    def cross_margin_account(self) -> cross_margin.Account:
-        """Returns the cross margin account."""
-        return cross_margin.Account(self._cli.cross_margin_account, self._ws_mgr)
-
-    @property
-    def isolated_margin_account(self) -> isolated_margin.Account:
-        """Returns the isolated margin account."""
-        return isolated_margin.Account(self._cli.isolated_margin_account, self._ws_mgr)
+    def _create_tick_event(self, symbol: str, tick: dict) -> 'event.Event':
+        """创建Tick事件对象"""
+        return {
+            'symbol': symbol,
+            'time': datetime.datetime.fromtimestamp(tick['time'] / 1000),
+            'price': Decimal(str(tick['lastPrice'])),
+            'volume': tick['volume'],
+            'bid1': Decimal(str(tick['bidPrice'][0])),
+            'ask1': Decimal(str(tick['askPrice'][0]))
+        }
 
 
 def get_filter_from_symbol_info(symbol_info: dict, filter_type: str) -> Optional[dict]:
