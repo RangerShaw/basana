@@ -1,19 +1,4 @@
-# Basana
-#
-# Copyright 2022 Gabriel Martin Becedillas Ruiz
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#   http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
+from datetime import datetime
 from decimal import Decimal
 import logging
 
@@ -25,10 +10,10 @@ logger = logging.getLogger(__name__)
 
 
 class Bar(bar.Bar):
-    def __init__(self, pair: Pair, json: dict):
+    def __init__(self, time: datetime, pair: Pair, json: dict):
         super().__init__(
-            helpers.timestamp_to_datetime(int(json["t"])), pair, Decimal(json["o"]), Decimal(json["h"]),
-            Decimal(json["l"]), Decimal(json["c"]), Decimal(json["v"])
+            time, pair, Decimal(json["open"]), Decimal(json["high"]),
+            Decimal(json["low"]), Decimal(json["lastPrice"]), Decimal(json["volume"])
         )
         self.pair: Pair = pair
         self.json: dict = json
@@ -38,23 +23,35 @@ class Bar(bar.Bar):
 class WebSocketEventSource(core_ws.ChannelEventSource):
     def __init__(self, pair: Pair, producer: event.Producer):
         super().__init__(producer=producer)
-        self._pair: Pair = pair
 
     async def push_from_message(self, message: dict):
         for ticker, data in message.items():
             print(ticker, data)
             t = helpers.timestamp_to_datetime(data['time'])
-
-        kline_event = message["data"]
-        kline = kline_event["k"]
-        # Wait for the last update to the kline.
-        if kline["x"] is False:
-            return
-        self.push(bar.BarEvent(
-            helpers.timestamp_to_datetime(int(kline_event["E"])),
-            Bar(self._pair, kline)
-        ))
+            this_bar = Bar(t, ticker, data)
+            self.push(bar.BarEvent(t, this_bar))
 
 
 def get_channel(pair: Pair, interval: str) -> str:
     return "{}@kline_{}".format(helpers.pair_to_order_book_symbol(pair).lower(), interval)
+
+
+datas = {
+    '002859.SZ': {
+        'amount': 61182700.0, 'askPrice': [19.71, 19.72, 19.73, 19.740000000000002, 19.76],
+        'askVol': [79, 7, 9, 5, 4], 'bidPrice': [19.7, 19.69, 19.68, 19.67, 19.66],
+        'bidVol': [220, 44, 96, 65, 135], 'high': 20.38, 'lastClose': 20.28, 'lastPrice': 19.71,
+        'lastSettlementPrice': 20.28, 'low': 19.7, 'open': 20.09, 'openInt': 13, 'pe': 0.0, 'pvolume': 3063327,
+        'settlementPrice': 0.0, 'speed1Min': 0.0, 'speed5Min': 0.0, 'stockStatus': 3, 'time': 1743650742000,
+        'transactionNum': 0, 'volRatio': 0.0, 'volume': 30633
+    },
+    '159819.SZ': {
+        'amount': 284167800.0, 'askPrice': [0.935, 0.936, 0.937, 0.9380000000000001, 0.9390000000000001],
+        'askVol': [28077, 41989, 32195, 13724, 4871], 'bidPrice': [0.934, 0.933, 0.932, 0.931, 0.93],
+        'bidVol': [48727, 118324, 36022, 34268, 55653], 'high': 0.9520000000000001, 'lastClose': 0.952,
+        'lastPrice': 0.934, 'lastSettlementPrice': 0.952, 'low': 0.934, 'open': 0.9400000000000001,
+        'openInt': 13, 'pe': 0.9343000000000001, 'pvolume': 301466000, 'settlementPrice': 0.0, 'speed1Min': 0.0,
+        'speed5Min': 0.0, 'stockStatus': 3, 'time': 1743650742000, 'transactionNum': 0, 'volRatio': 0.0,
+        'volume': 3014660
+    }
+}

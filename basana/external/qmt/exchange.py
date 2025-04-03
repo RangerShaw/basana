@@ -52,15 +52,15 @@ class PairInfoEx(PairInfo):
     permissions: List[str]
 
 
-class QMTExchange:
+class Exchange:
     """QMT A股交易所接口封装"""
 
     def __init__(
-            self, xt_trader: XtQuantTrader, account: StockAccount, dispatcher: dispatcher.EventDispatcher,
+            self, dispatcher: dispatcher.EventDispatcher, qmt_path: str, account_id: str, session: str = '123456',
             config: dict = None
     ):
-        self.xt_trader = xt_trader
-        self.account = account
+        self.xt_trader = XtQuantTrader(qmt_path, session)
+        self.account = StockAccount(account_id)
         self.dispatcher = dispatcher
         self.config = config or {}
         self._pair_info_cache: Dict[str, dict] = {}
@@ -79,6 +79,11 @@ class QMTExchange:
         qmt_period = self._convert_period(interval)
         xtdata.subscribe_quote(symbol, qmt_period, callback=event_handler)
         self.subscribed_pairs.add(symbol)
+
+    def subscribe_to_multi_bar_events(self, tickers: [str], event_handler: callable):
+        """订阅多只股票的K线数据"""
+        xtdata.subscribe_whole_quote(tickers, callback=event_handler)
+        self.subscribed_pairs.add(tickers)
 
     def subscribe_to_order_book_events(self, symbol: str, event_handler: callable, depth: int = 10):
         """订阅订单簿更新"""
