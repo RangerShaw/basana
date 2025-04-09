@@ -1,19 +1,3 @@
-# Basana
-#
-# Copyright 2022 Gabriel Martin Becedillas Ruiz
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#   http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 from decimal import Decimal
 from typing import Dict, List, Optional, Tuple, Union
 import dataclasses
@@ -85,23 +69,9 @@ class Exchange:
         xtdata.subscribe_whole_quote(tickers, callback=event_handler)
         self.subscribed_pairs.add(tickers)
 
-    def subscribe_to_order_book_events(self, symbol: str, event_handler: callable, depth: int = 10):
-        """订阅订单簿更新"""
-        # QMT Level2数据需要特殊处理
-        xtdata.subscribe_quote(symbol, 'order_book', callback=event_handler)
-
     def subscribe_to_trade_events(self, symbol: str, event_handler: callable):
         """订阅逐笔成交"""
         xtdata.subscribe_quote(symbol, 'tick', callback=event_handler)
-
-    # 行情数据获取
-    async def get_bid_ask(self, symbol: str) -> Tuple[Decimal, Decimal]:
-        """获取当前最优买卖价"""
-        quote = xtdata.get_full_tick([symbol]).get(symbol, {})
-        return (
-            Decimal(str(quote.get('bidPrice', [0])[0])),
-            Decimal(str(quote.get('askPrice', [0])[0]))
-        )
 
     async def get_pair_info(self, symbol: str) -> dict:
         """获取证券基本信息"""

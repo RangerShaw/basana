@@ -7,11 +7,16 @@ import logging
 import time
 
 import aiohttp
-from typing import Dict, List, Optional, Any, Set
+from typing import Dict, List, Optional, Any, Set, cast, Callable
 
-from . import client, config
-from basana.core import dispatcher, logs, event, helpers, websockets as core_ws
+from . import config, client, order_book, trades, user_data as binance_ws, klines
+from basana.core import dispatcher, bar, logs, event, helpers, websockets as core_ws
 from basana.core.config import get_config_value
+from basana.core.pair import Pair
+
+from xtquant import xttrader, xtdata, xtconstant
+from xtquant.xttype import StockAccount
+from xtquant.xttrader import XtQuantTrader, XtQuantTraderCallback
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +64,7 @@ class PublicChannel(Channel):
         return self._name
 
 
-class WebSocketClient(event.Producer, metaclass=abc.ABCMeta):
+class QmtClient(event.Producer, metaclass=abc.ABCMeta):
     def __init__(
             self, dispatcher: dispatcher.EventDispatcher, api_client: client.APIClient,
             session: Optional[aiohttp.ClientSession] = None, config_overrides: dict = {}
@@ -86,13 +91,16 @@ class WebSocketClient(event.Producer, metaclass=abc.ABCMeta):
         self._next_keep_alive: Dict[str, datetime.datetime] = {}
         self._next_msg_id = int(time.time() * 1000)
 
-    def set_channel_event_source_ex(self, channel: Channel, event_source: core_ws.ChannelEventSource):
+    def set_channel_event_source_ex(self, channel: Channel, event_source: ChannelEventSource):
         assert channel.alias not in self._alias_to_channel, "channel already registered"
-        super().set_channel_event_source(channel.alias, event_source)
+        assert channel not in self._event_sources, "channel already registered"
+        self._event_sources[channel.alias] = event_source
+        self._pending_subscriptions.add(channel.alias)
+        self._subscribe_request.set()
         self._alias_to_channel[channel.alias] = channel
 
-    def get_channel_event_source_ex(self, channel: Channel) -> Optional[core_ws.ChannelEventSource]:
-        return super().get_channel_event_source(channel.alias)
+    def get_channel_event_source_ex(self, channel: Channel) -> Optional[ChannelEventSource]:
+        return self._event_sources.get(channel.alias)
 
     async def subscribe_to_channels(self, channel_aliases: List[str], ws_cli: aiohttp.ClientWebSocketResponse):
         logger.debug(logs.StructuredMessage("Subscribing", src=self, channels=channel_aliases))
@@ -140,8 +148,6 @@ class WebSocketClient(event.Producer, metaclass=abc.ABCMeta):
             try:
                 logger.debug(logs.StructuredMessage("Connecting QMT", src=self))
                 last_connect_ts = time.time()
-
-                # proxy = None
 
                 async with helpers.TaskGroup() as tg:
                     # Turn this off since we just reconnected.
@@ -245,3 +251,49 @@ class WebSocketClient(event.Producer, metaclass=abc.ABCMeta):
             logger.debug(logs.StructuredMessage("Scheduling keep alive", when=schedule_dt, alias=channel.alias))
             self._next_keep_alive[channel.alias] = schedule_dt
             self._dispatcher.schedule(schedule_dt, self._keep_alive_channel(channel))
+
+
+class QmtClientManager:
+    def __init__(
+            self, dispatch: dispatcher.EventDispatcher, api_client: client.APIClient,
+            session: Optional[aiohttp.ClientSession] = None, config_overrides: dict = {}
+    ):
+        self._dispatcher = dispatch
+        self._cli = api_client
+        self._session = session
+        self._config_overrides = config_overrides
+        self._websocket: Optional[QmtClient] = None
+
+    def subscribe_to_bar_events(self, pair: Pair, interval: str, event_handler: bar.BarEventHandler):
+        self._subscribe_to_ws_channel_events(
+            PublicChannel(klines.get_channel(pair, interval)),
+            lambda ws_cli: klines.WebSocketEventSource(pair, ws_cli),
+            cast(dispatcher.EventHandler, event_handler)
+        )
+
+    def subscribe_to_multi_bar_events(self, tickers: [str], event_handler: callable):
+        """订阅多只股票的K线数据"""
+        xtdata.subscribe_whole_quote(tickers, callback=event_handler)
+        self.subscribed_pairs.add(tickers)
+
+    def _subscribe_to_ws_channel_events(
+            self, channel: Channel,
+            event_src_factory: Callable[[QmtClient], ChannelEventSource],
+            event_handler: dispatcher.EventHandler
+    ):
+        # Get/create the event source for the channel.
+        ws_cli = self._get_ws_client()
+        event_source = ws_cli.get_channel_event_source_ex(channel)
+        if not event_source:
+            event_source = event_src_factory(ws_cli)
+            ws_cli.set_channel_event_source_ex(channel, event_source)
+
+        # Subscribe the event handler to the event source.
+        self._dispatcher.subscribe(event_source, event_handler)
+
+    def _get_ws_client(self) -> QmtClient:
+        if self._websocket is None:
+            self._websocket = QmtClient(
+                self._dispatcher, self._cli, session=self._session, config_overrides=self._config_overrides
+            )
+        return self._websocket
