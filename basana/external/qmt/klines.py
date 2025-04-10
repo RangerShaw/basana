@@ -33,7 +33,7 @@ class WebSocketEventSource(qm.ChannelEventSource):
 
 
 def get_channel(pair: Pair, interval: str) -> str:
-    return f"{pair.base_symbol}@kline_{interval}"
+    return f"{pair.base_symbol}@kline_{interval}_QMT"
 
 
 datas = {

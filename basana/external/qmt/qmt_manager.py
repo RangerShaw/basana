@@ -9,7 +9,7 @@ import time
 import aiohttp
 from typing import Dict, List, Optional, Any, Set, cast, Callable
 
-from . import config, client, order_book, trades, user_data as binance_ws, klines
+from . import config,  klines
 from basana.core import dispatcher, bar, logs, event, helpers, websockets as core_ws
 from basana.core.config import get_config_value
 from basana.core.pair import Pair
@@ -125,6 +125,11 @@ class QmtClient(event.Producer, metaclass=abc.ABCMeta):
         for channel in channels:
             self._schedule_keep_alive(channel)
 
+    async def subscribe_to_stocks(self, tickers: List[str], ws_cli: aiohttp.ClientWebSocketResponse):
+        logger.debug(logs.StructuredMessage("Subscribing", src=self, channels=tickers))
+        xtdata.subscribe_whole_quote(tickers, callback=self._on_quote_datas)
+        # self._schedule_keep_alive(tickers)
+
     def schedule_resubscription(self, channels: List[str]):
         self._pending_subscriptions.update(channels)
 
@@ -223,6 +228,11 @@ class QmtClient(event.Producer, metaclass=abc.ABCMeta):
             await coro
             ret = True
         return ret
+
+    async def _on_quote_datas(self, datas: dict):
+        for ticker, data in datas.items():
+            if source := self._event_sources.get(ticker):
+                source.push_data(data)
 
     async def _on_response(self, message: dict):
         if message["result"] is not None:
