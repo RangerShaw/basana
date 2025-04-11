@@ -21,7 +21,7 @@ class Bar(bar.Bar):
 
 # Generate BarEvents events from websocket messages.
 class WebSocketEventSource(qm.ChannelEventSource):
-    def __init__(self, pair: Pair, producer: event.Producer):
+    def __init__(self, producer: event.Producer):
         super().__init__(producer=producer)
 
     async def push_from_message(self, message: dict):
@@ -32,8 +32,8 @@ class WebSocketEventSource(qm.ChannelEventSource):
             self.push(bar.BarEvent(t, this_bar))
 
 
-def get_channel(pair: Pair, interval: str) -> str:
-    return f"{pair.base_symbol}@kline_{interval}_QMT"
+def get_channel(interval: str) -> str:
+    return f"kline_{interval}@QMT"
 
 
 datas = {
