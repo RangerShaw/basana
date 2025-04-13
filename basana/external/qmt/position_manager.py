@@ -6,11 +6,12 @@ import datetime
 import json
 import logging
 from xtquant import xttrader
-
+from xtquant.xtconstant import *
 from basana.core.logs import StructuredMessage
 from basana.external.binance import exchange, spot
 import basana as bs
-from exchange import QmtExchange
+from .exchange import Exchange
+
 
 @dataclasses.dataclass
 class PositionInfo:
@@ -29,7 +30,7 @@ class PositionInfo:
 class SpotAccountPositionManager:
     # Responsible for managing orders and tracking positions in response to trading signals.
     def __init__(
-            self, exchange: QmtExchange, position_amount: Decimal, quote_symbol: str,
+            self, exchange: exchange.Exchange, position_amount: Decimal, quote_symbol: str,
             stop_loss_pct: Decimal, checkpoint_fname: str
     ):
         assert position_amount > 0

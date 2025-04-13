@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 import logging
 
-from . import helpers, qmt_manager as qm
+from . import qmt_helpers, qmt_manager
 from basana.core import bar, event
 from basana.core.pair import Pair
 
@@ -19,17 +19,6 @@ class Bar(bar.Bar):
         self.json: dict = json
 
 
-# Generate BarEvents events from websocket messages.
-class WebSocketEventSource(qm.ChannelEventSource):
-    def __init__(self, producer: event.Producer):
-        super().__init__(producer=producer)
-
-    async def push_from_message(self, message: dict):
-        for ticker, data in message.items():
-            print(ticker, data)
-            t = helpers.timestamp_to_datetime(data['time'])
-            this_bar = Bar(t, ticker, data)
-            self.push(bar.BarEvent(t, this_bar))
 
 
 def get_channel(interval: str) -> str:

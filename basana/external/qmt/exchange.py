@@ -8,17 +8,19 @@ from xtquant.xttrader import XtQuantTrader, XtQuantTraderCallback
 import aiohttp
 import datetime
 
-from . import client, helpers, order_book, trades, spot, cross_margin, isolated_margin, websocket_mgr
+from . import qmt_helpers, qmt_manager
 from basana.core import bar, dispatcher, enums, token_bucket
 from basana.core.pair import Pair, PairInfo
 
 BarEventHandler = bar.BarEventHandler
-Error = client.Error
-OrderBookEvent = order_book.OrderBookEvent
-OrderBookEventHandler = order_book.OrderBookEventHandler
-OrderOperation = enums.OrderOperation
-TradeEvent = trades.TradeEvent
-TradeEventHandler = trades.TradeEventHandler
+
+
+# Error = client.Error
+# OrderBookEvent = order_book.OrderBookEvent
+# OrderBookEventHandler = order_book.OrderBookEventHandler
+# OrderOperation = enums.OrderOperation
+# TradeEvent = trades.TradeEvent
+# TradeEventHandler = trades.TradeEventHandler
 
 
 @dataclasses.dataclass(frozen=True)
@@ -40,7 +42,7 @@ class Exchange:
     """QMT A股交易所接口封装"""
 
     def __init__(
-            self, dispatcher: dispatcher.EventDispatcher, qmt_path: str, account_id: str, session: str = '123456',
+            self, dispatcher: dispatcher.EventDispatcher, qmt_path: str, account_id: str, session: int = 123456,
             config: dict = None
     ):
         self.xt_trader = XtQuantTrader(qmt_path, session)
@@ -48,7 +50,7 @@ class Exchange:
         self.dispatcher = dispatcher
         self.config = config or {}
         self._pair_info_cache: Dict[str, dict] = {}
-
+        self._qmt_mgr = qmt_manager.QmtClientManager(dispatcher, session)
         # 行情订阅管理
         self.subscribed_pairs = set()
         self._setup_event_handlers()
@@ -64,10 +66,8 @@ class Exchange:
         xtdata.subscribe_quote(symbol, qmt_period, callback=event_handler)
         self.subscribed_pairs.add(symbol)
 
-    def subscribe_to_multi_bar_events(self, tickers: [str], event_handler: callable):
-        """订阅多只股票的K线数据"""
-        xtdata.subscribe_whole_quote(tickers, callback=event_handler)
-        self.subscribed_pairs.add(tickers)
+    def subscribe_to_multi_bar_events(self, tickers: [str], interval: str, event_handler: callable):
+        self._qmt_mgr.subscribe_to_multi_bar_events(["600157.SH", "002859.SZ", "159819.SZ"], interval, event_handler)
 
     def subscribe_to_trade_events(self, symbol: str, event_handler: callable):
         """订阅逐笔成交"""
@@ -86,23 +86,23 @@ class Exchange:
         return self._pair_info_cache[symbol]
 
     # 订单相关方法
-    async def create_order(
-            self, symbol: str, operation: int, amount: int, price_type: int = xtconstant.FIX_PRICE, price: float = None
-    ) -> str:
-        """创建股票订单"""
-        order = StockOrder()
-        order.stock_code = symbol
-        order.order_type = operation
-        order.order_volume = amount
-        order.price_type = price_type
-        order.price = price or 0.0
-
-        # 调用QMT交易接口
-        order_id = self.xt_trader.order_stock(
-            self.account, symbol, operation, amount,
-            price_type, price, "Strategy", "AutoOrder"
-        )
-        return str(order_id)
+    # async def create_order(
+    #         self, symbol: str, operation: int, amount: int, price_type: int = xtconstant.FIX_PRICE, price: float = None
+    # ) -> str:
+    #     """创建股票订单"""
+    #     order = StockOrder()
+    #     order.stock_code = symbol
+    #     order.order_type = operation
+    #     order.order_volume = amount
+    #     order.price_type = price_type
+    #     order.price = price or 0.0
+    #
+    #     # 调用QMT交易接口
+    #     order_id = self.xt_trader.order_stock(
+    #         self.account, symbol, operation, amount,
+    #         price_type, price, "Strategy", "AutoOrder"
+    #     )
+    #     return str(order_id)
 
     async def cancel_order(self, symbol: str, order_id: str) -> bool:
         """取消订单"""
@@ -129,18 +129,18 @@ class Exchange:
         return {pos.stock_code: self._format_position(pos) for pos in positions}
 
     # 数据处理方法
-    def _format_order(self, order: StockOrder) -> dict:
-        """格式化订单信息"""
-        return {
-            'id': str(order.order_id),
-            'symbol': order.stock_code,
-            'amount': order.order_volume,
-            'filled': order.traded_volume,
-            'price': Decimal(str(order.price)),
-            'status': self._convert_order_status(order.order_status),
-            'side': 'BUY' if order.order_type == xtconstant.STOCK_BUY else 'SELL',
-            'timestamp': datetime.datetime.fromtimestamp(order.order_time / 1000)
-        }
+    # def _format_order(self, order: StockOrder) -> dict:
+    #     """格式化订单信息"""
+    #     return {
+    #         'id': str(order.order_id),
+    #         'symbol': order.stock_code,
+    #         'amount': order.order_volume,
+    #         'filled': order.traded_volume,
+    #         'price': Decimal(str(order.price)),
+    #         'status': self._convert_order_status(order.order_status),
+    #         'side': 'BUY' if order.order_type == xtconstant.STOCK_BUY else 'SELL',
+    #         'timestamp': datetime.datetime.fromtimestamp(order.order_time / 1000)
+    #     }
 
     def _format_position(self, position) -> dict:
         """格式化持仓信息"""

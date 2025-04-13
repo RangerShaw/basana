@@ -2,18 +2,18 @@ from urllib.parse import urljoin
 import abc
 import asyncio
 import datetime
-import json
 import logging
 import time
 
 import aiohttp
 from typing import Dict, List, Optional, Any, Set, cast, Callable
-from functools import partial
+from functools import partial, partialmethod
 
 from . import config, klines
-from basana.core import dispatcher, bar, logs, event, helpers, websockets as core_ws
+from basana.core import dispatcher, bar, logs, event, helpers
 from basana.core.config import get_config_value
 from basana.core.pair import Pair
+from . import qmt_helpers
 
 from xtquant import xttrader, xtdata, xtconstant
 from xtquant.xttype import StockAccount
@@ -42,7 +42,6 @@ class Channel(metaclass=abc.ABCMeta):
     def stream(self) -> str:
         raise NotImplementedError()
 
-
     def keep_alive_period(self, config_overrides: dict = {}) -> Optional[datetime.timedelta]:
         return None
 
@@ -65,10 +64,21 @@ class PublicChannel(Channel):
     def stream(self) -> str:
         return self._name
 
+# Generate BarEvents events from websocket messages.
+class WebSocketEventSource(ChannelEventSource):
+    def __init__(self, producer: event.Producer):
+        super().__init__(producer=producer)
+
+    def push_from_message(self, message: dict):
+        for ticker, data in message.items():
+            print(ticker, data)
+            t = qmt_helpers.timestamp_to_datetime(data['time'])
+            this_bar = klines.Bar(t, ticker, data)
+            self.push(bar.BarEvent(t, this_bar))
 
 class QmtClient(event.Producer, metaclass=abc.ABCMeta):
     def __init__(
-            self, dispatcher: dispatcher.EventDispatcher, session: Optional[aiohttp.ClientSession] = None,
+            self, dispatcher: dispatcher.EventDispatcher, session: int = None,
             config_overrides: dict = {}
     ):
         url = urljoin(
@@ -131,8 +141,8 @@ class QmtClient(event.Producer, metaclass=abc.ABCMeta):
         xtdata.subscribe_whole_quote(tickers, callback=partial(self._on_quote_datas, channel_alias))
         # self._schedule_keep_alive(tickers)
 
-    def schedule_resubscription(self, channels: List[str]):
-        self._pending_subscriptions.update(channels)
+    def schedule_resubscription(self, channel_alias: str, tickers: Set[str]):
+        self._pending_subscriptions[channel_alias].update(tickers)
 
     async def on_error(self, error: Any):
         logger.error(logs.StructuredMessage("Error", src=self, error=error))
@@ -147,9 +157,9 @@ class QmtClient(event.Producer, metaclass=abc.ABCMeta):
         last_connect_ts = 0
         while True:
             # Backoff, if necessary, before connecting.
-            prev_attemp_age = time.time() - last_connect_ts
-            if prev_attemp_age < self.backoff_secs:
-                await asyncio.sleep(self.backoff_secs - prev_attemp_age)
+            prev_attempt_age = time.time() - last_connect_ts
+            if prev_attempt_age < self.backoff_secs:
+                await asyncio.sleep(self.backoff_secs - prev_attempt_age)
 
             try:
                 logger.debug(logs.StructuredMessage("Connecting QMT", src=self))
@@ -160,49 +170,50 @@ class QmtClient(event.Producer, metaclass=abc.ABCMeta):
                     self._reconnect_request.clear()
 
                     # Connect to all channels.
-                    self._pending_subscriptions.update(self._event_sources.keys())
+                    # self._pending_subscriptions.update(self._event_sources.keys())
                     self._subscribe_request.set()
 
                     # Run tasks.
-                    tg.create_task(self._msg_loop(ws_cli))
-                    tg.create_task(self._subscribe_loop(ws_cli))
-                    tg.create_task(self._reconnect(ws_cli))
+                    tg.create_task(self._subscribe_loop())
+                    # tg.create_task(self._msg_loop(ws_cli))
+                    # tg.create_task(self._reconnect(ws_cli))
             except Exception as e:
                 await self.on_error(e)
 
-    async def _msg_loop(self, ws_cli: aiohttp.ClientWebSocketResponse):
-        logger.debug(logs.StructuredMessage("Running message loop", src=self))
+    # async def _msg_loop(self, ws_cli: aiohttp.ClientWebSocketResponse):
+    #     logger.debug(logs.StructuredMessage("Running message loop", src=self))
+    #
+    #     # The iterator exits normally when the connection is closed with close code 1000 (OK) or 1001 (going away).
+    #     # It raises a ConnectionClosedError when the connection is closed with any other code.
+    #     async for message in ws_cli:
+    #         handled = False
+    #         if message.type == aiohttp.WSMsgType.TEXT:
+    #             json_msg = json.loads(message.data)
+    #             handled = await self.handle_message(json_msg)
+    #         if not handled:
+    #             await self.on_unknown_message(message)
+    #
+    #     # If the message loop finished we need to notify the other tasks so they can finish as well.
+    #     self._subscribe_request.set()
+    #     self._reconnect_request.set()
 
-        # The iterator exits normally when the connection is closed with close code 1000 (OK) or 1001 (going away).
-        # It raises a ConnectionClosedError when the connection is closed with any other code.
-        async for message in ws_cli:
-            handled = False
-            if message.type == aiohttp.WSMsgType.TEXT:
-                json_msg = json.loads(message.data)
-                handled = await self.handle_message(json_msg)
-            if not handled:
-                await self.on_unknown_message(message)
-
-        # If the message loop finished we need to notify the other tasks so they can finish as well.
-        self._subscribe_request.set()
-        self._reconnect_request.set()
-
-    async def _subscribe_loop(self, ws_cli: aiohttp.ClientWebSocketResponse):
+    async def _subscribe_loop(self):
         while True:
             await self._subscribe_request.wait()
             self._subscribe_request.clear()
             if xtdata.get_client().is_connected():
+                logger.debug(logs.StructuredMessage("Subscribing", _pending_subscriptions=self._pending_subscriptions))
                 for channel_alias, tickers in self._pending_subscriptions.items():
-                    await self.subscribe_to_stocks(channel_alias, tickers)
+                    await self.subscribe_to_stocks(channel_alias, list(tickers))
                 self._pending_subscriptions = {}
 
-    async def _reconnect(self, ws_cli: aiohttp.ClientWebSocketResponse):
-        # Will exit when reconnection is requested or when its canceled.
-        await self._reconnect_request.wait()
-        self._reconnect_request.clear()
-        # If the client is already closed then there is nothing left to do.
-        if not ws_cli.closed:
-            await ws_cli.close()
+    # async def _reconnect(self, ws_cli: aiohttp.ClientWebSocketResponse):
+    #     # Will exit when reconnection is requested or when its canceled.
+    #     await self._reconnect_request.wait()
+    #     self._reconnect_request.clear()
+    #     # If the client is already closed then there is nothing left to do.
+    #     if not ws_cli.closed:
+    #         await ws_cli.close()
 
     # async def handle_message(self, message: dict) -> bool:
     #     coro = None
@@ -230,9 +241,9 @@ class QmtClient(event.Producer, metaclass=abc.ABCMeta):
     #         ret = True
     #     return ret
 
-    async def _on_quote_datas(self, channel_alias: str, datas: dict):
+    def _on_quote_datas(self, channel_alias: str, datas: dict):
         if source := self._event_sources.get(channel_alias):
-            await source.push_from_message(datas)
+            source.push_from_message(datas)
 
     async def _on_response(self, message: dict):
         if message["result"] is not None:
@@ -243,29 +254,29 @@ class QmtClient(event.Producer, metaclass=abc.ABCMeta):
         self._next_msg_id += 1
         return ret
 
-    def _keep_alive_channel(self, channel: Channel) -> dispatcher.SchedulerJob:
-        async def scheduler_job():
-            if self._next_keep_alive[channel.alias] <= self._dispatcher.now():
-                logger.debug(logs.StructuredMessage("Channel keep alive", alias=channel.alias))
-                try:
-                    await channel.keep_alive(self._cli)
-                finally:
-                    self._schedule_keep_alive(channel)
-
-        return scheduler_job
-
-    def _schedule_keep_alive(self, channel: Channel):
-        period = channel.keep_alive_period(self._config_overrides)
-        if period:
-            schedule_dt = self._dispatcher.now() + period
-            logger.debug(logs.StructuredMessage("Scheduling keep alive", when=schedule_dt, alias=channel.alias))
-            self._next_keep_alive[channel.alias] = schedule_dt
-            self._dispatcher.schedule(schedule_dt, self._keep_alive_channel(channel))
+    # def _keep_alive_channel(self, channel: Channel) -> dispatcher.SchedulerJob:
+    #     async def scheduler_job():
+    #         if self._next_keep_alive[channel.alias] <= self._dispatcher.now():
+    #             logger.debug(logs.StructuredMessage("Channel keep alive", alias=channel.alias))
+    #             try:
+    #                 await channel.keep_alive(self._cli)
+    #             finally:
+    #                 self._schedule_keep_alive(channel)
+    #
+    #     return scheduler_job
+    #
+    # def _schedule_keep_alive(self, channel: Channel):
+    #     period = channel.keep_alive_period(self._config_overrides)
+    #     if period:
+    #         schedule_dt = self._dispatcher.now() + period
+    #         logger.debug(logs.StructuredMessage("Scheduling keep alive", when=schedule_dt, alias=channel.alias))
+    #         self._next_keep_alive[channel.alias] = schedule_dt
+    #         self._dispatcher.schedule(schedule_dt, self._keep_alive_channel(channel))
 
 
 class QmtClientManager:
     def __init__(
-            self, dispatch: dispatcher.EventDispatcher, session: Optional[aiohttp.ClientSession] = None,
+            self, dispatch: dispatcher.EventDispatcher, session: int = None,
             config_overrides: dict = {}
     ):
         self._dispatcher = dispatch
@@ -277,7 +288,7 @@ class QmtClientManager:
         self._subscribe_to_ws_channel_events(
             PublicChannel(klines.get_channel(interval)),
             [pair.base_symbol],
-            lambda ws_cli: klines.WebSocketEventSource(ws_cli),
+            lambda ws_cli: WebSocketEventSource(ws_cli),
             cast(dispatcher.EventHandler, event_handler)
         )
 
@@ -285,7 +296,7 @@ class QmtClientManager:
         self._subscribe_to_ws_channel_events(
             PublicChannel(klines.get_channel(interval)),
             tickers,
-            lambda ws_cli: klines.WebSocketEventSource(ws_cli),
+            lambda ws_cli: WebSocketEventSource(ws_cli),
             cast(dispatcher.EventHandler, event_handler)
         )
 
