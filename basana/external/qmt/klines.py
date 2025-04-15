@@ -12,13 +12,11 @@ logger = logging.getLogger(__name__)
 class Bar(bar.Bar):
     def __init__(self, time: datetime, pair: Pair, json: dict):
         super().__init__(
-            time, pair, Decimal(json["open"]), Decimal(json["high"]),
-            Decimal(json["low"]), Decimal(json["lastPrice"]), Decimal(json["volume"])
+            time, pair, Decimal(json["open"]), Decimal(json["high"]), Decimal(json["low"]), Decimal(json["lastPrice"]),
+            Decimal(json["volume"]), Decimal(json["lastPrice"] / json["lastClose"])
         )
         self.pair: Pair = pair
         self.json: dict = json
-
-
 
 
 def get_channel(interval: str) -> str:

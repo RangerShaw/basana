@@ -25,7 +25,7 @@ async def main():
     # Connect the strategy to the bar events from the exchange.
     strategy = bbands.Strategy(event_dispatcher, period=20, std_dev=1.5)
     # exchange.subscribe_to_bar_events(pair.base_symbol, "1s", strategy.on_bar_event)
-    exchange.subscribe_to_multi_bar_events(["600157.SH", "002859.SZ", "159819.SZ"],"3s",  strategy.on_bar_event)
+    exchange.subscribe_to_multi_bar_events(["600157.SH", "002859.SZ", "000538.SZ"],"3s",  strategy.on_bar_event)
 
     # We'll be using the spot account, so there will be no short positions opened.
     position_mgr = position_manager.SpotAccountPositionManager(
@@ -33,7 +33,7 @@ async def main():
     )
     # Connect the position manager to the strategy signals and to bar events just for logging.
     strategy.subscribe_to_trading_signals(position_mgr.on_trading_signal)
-    exchange.subscribe_to_multi_bar_events(["600157.SH", "002859.SZ", "159819.SZ"], "3s", position_mgr.on_bar_event)
+    exchange.subscribe_to_multi_bar_events(["600157.SH", "002859.SZ", "000538.SZ"], "3s", position_mgr.on_bar_event)
 
     await event_dispatcher.run()
 

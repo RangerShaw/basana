@@ -22,7 +22,6 @@ import logging
 
 from basana.core import dt, event, logs, pair
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -44,7 +43,7 @@ class Bar:
 
     def __init__(
             self, datetime: datetime.datetime, pair: pair.Pair,
-            open: Decimal, high: Decimal, low: Decimal, close: Decimal, volume: Decimal
+            open: Decimal, high: Decimal, low: Decimal, close: Decimal, volume: Decimal, pct_change: Decimal = None
     ):
         if high < low:
             raise InvalidBar(f"high < low on {datetime}")
@@ -71,6 +70,8 @@ class Bar:
         self.close = close
         #: The volume traded.
         self.volume = volume
+        #: 对日频及以下，相对昨收；对日频以上，相对前一bar的Close
+        self.pct_change = pct_change
 
 
 class BarEvent(event.Event):

@@ -67,7 +67,7 @@ class Exchange:
         self.subscribed_pairs.add(symbol)
 
     def subscribe_to_multi_bar_events(self, tickers: [str], interval: str, event_handler: callable):
-        self._qmt_mgr.subscribe_to_multi_bar_events(["600157.SH", "002859.SZ", "159819.SZ"], interval, event_handler)
+        self._qmt_mgr.subscribe_to_multi_bar_events(tickers, interval, event_handler)
 
     def subscribe_to_trade_events(self, symbol: str, event_handler: callable):
         """订阅逐笔成交"""
