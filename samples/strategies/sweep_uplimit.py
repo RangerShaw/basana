@@ -23,7 +23,7 @@ class Strategy(bs.TradingSignalSource, bs.Strategy):
 
         if pct_change >= 0.8:
             amount = int(free_cash / curr_price / 100) * 100
-            self.o_controller.create_order_market(bar_event.bar.pair.base_symbol, bs.OrderOperation.BUY, amount)
+            await self.o_controller.create_order_market(bar_event.bar.pair.base_symbol, bs.OrderOperation.BUY, amount)
         elif bar_event.bar.close / self.high_after_buy <= self.sell_point:
-            self.o_controller.create_order_market(bar_event.bar.pair.base_symbol, bs.OrderOperation.SELL, free_asset)
+            await self.o_controller.create_order_market(bar_event.bar.pair.base_symbol, bs.OrderOperation.SELL, free_asset)
 
