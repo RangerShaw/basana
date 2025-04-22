@@ -53,20 +53,13 @@ class Exchange:
             }
         return self.asset_info[ticker]
 
-    def create_order_limit(self, side: OrderSide, ticker: str, quantity: int, limit: Decimal,
-                           on_order_error: Callable = None) -> Order:
-        if Callable is None:
-            order_id = self.xt_trader.order_stock(self.account, ticker, side, quantity, OrderPriceType.FIX_PRICE, limit)
-        else:
-            order_id = self.xt_trader.order_stock_async(self.account, ticker, side, quantity, OrderPriceType.FIX_PRICE,
-                                                        limit)
-
-        if order_id == -1:
-            logger.error(f"[ORDER] Creating order FAILED: {side} {quantity} {ticker} @{limit}")
+    def create_order_limit(self, side: OrderSide, ticker: str, quantity: int, limit: Decimal) -> Order:
+        order_id = self.xt_trader.order_stock_async(
+            self.account, ticker, side, quantity, OrderPriceType.FIX_PRICE, limit
+        )
         return Order(order_id, self.account, ticker, side, quantity, OrderPriceType.FIX_PRICE, limit)
 
-    async def cancel_order(self, symbol: str, order_id: str) -> bool:
-        """取消订单"""
+    async def cancel_order(self, order_id: int) -> bool:
         return self.xt_trader.cancel_order_stock(self.account, order_id) == 0
 
     async def get_order_info(self, symbol: str, order_id: str) -> dict:

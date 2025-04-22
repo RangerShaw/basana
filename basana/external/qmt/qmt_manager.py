@@ -64,6 +64,7 @@ class PublicChannel(Channel):
     def stream(self) -> str:
         return self._name
 
+
 # Generate BarEvents events from websocket messages.
 class WebSocketEventSource(ChannelEventSource):
     def __init__(self, producer: event.Producer):
@@ -75,6 +76,7 @@ class WebSocketEventSource(ChannelEventSource):
             t = qmt_helpers.timestamp_to_datetime(data['time'])
             this_bar = klines.Bar(t, ticker, data)
             self.push(bar.BarEvent(t, this_bar))
+
 
 class QmtClient(event.Producer, metaclass=abc.ABCMeta):
     def __init__(
@@ -272,6 +274,35 @@ class QmtClient(event.Producer, metaclass=abc.ABCMeta):
     #         logger.debug(logs.StructuredMessage("Scheduling keep alive", when=schedule_dt, alias=channel.alias))
     #         self._next_keep_alive[channel.alias] = schedule_dt
     #         self._dispatcher.schedule(schedule_dt, self._keep_alive_channel(channel))
+
+
+class QmtTraderCallback(XtQuantTraderCallback):
+    def on_disconnected(self):
+        print("connection lost")
+
+    def on_stock_order(self, order):
+        print("on order callback:")
+        print(order.stock_code, order.order_status, order.order_sysid)
+
+    def on_stock_trade(self, trade):
+        print("on trade callback")
+        print(trade.account_id, trade.stock_code, trade.order_id)
+
+    def on_order_error(self, order_error):
+        print("on order_error callback")
+        print(order_error.order_id, order_error.error_id, order_error.error_msg)
+
+    def on_cancel_error(self, cancel_error):
+        print("on cancel_error callback")
+        print(cancel_error.order_id, cancel_error.error_id, cancel_error.error_msg)
+
+    def on_order_stock_async_response(self, response):
+        print("on_order_stock_async_response")
+        print(response.account_id, response.order_id, response.seq)
+
+    def on_account_status(self, status):
+        print("on_account_status")
+        print(status.account_id, status.account_type, status.status)
 
 
 class QmtClientManager:

@@ -65,7 +65,7 @@ from .core.token_bucket import (
     TokenBucketLimiter,
 )
 
-from .core.order_controller import (
+from basana.external.qmt.order_controller import (
     OrderController
 )
 

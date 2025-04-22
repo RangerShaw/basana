@@ -9,5 +9,5 @@ class Broker(ABC):
         pass
 
     @abstractmethod
-    def create_order_limit(self, ticker: str, side: enums.OrderOperation, amount: int, limit: Decimal):
+    def create_order_limit(self, ticker: str, side: enums.OrderOperation, quantity: int, limit: Decimal):
         pass
