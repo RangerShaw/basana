@@ -4,7 +4,7 @@ from decimal import Decimal
 import asyncio
 import logging
 from typing import Dict, List, Optional, Tuple, Union, Callable
-from order import Order
+from .order import Order
 
 logger = logging.getLogger(__name__)
 
