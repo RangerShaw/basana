@@ -73,5 +73,6 @@ from .core.broker import (
     Broker
 )
 from .core.strategy import (
-    Strategy
+    Strategy,
+    StrategyController
 )

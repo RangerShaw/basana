@@ -1,6 +1,14 @@
+import basana as bs
+from typing import List
+
+
 class Limibot:
     def __init__(self, exchange, ):
-        pass
+        self.exchange = exchange
+        self.order_controller = bs.OrderController(self.exchange)
+        self.strategy_controller = bs.StrategyController(self.order_controller)
+
+    def subscribe_strategy_to_bars(self, strategy: bs.Strategy, tickers: [str | List[str]]):
 
 
 import asyncio
