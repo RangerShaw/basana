@@ -8,7 +8,8 @@ class Limibot:
         self.order_controller = bs.OrderController(self.exchange)
         self.strategy_controller = bs.StrategyController(self.order_controller)
 
-    def subscribe_strategy_to_bars(self, strategy: bs.Strategy, tickers: [str | List[str]]):
+    def subscribe_strategy_to_bars(self, strategy: bs.Strategy, ticker: str):
+        self.strategy_controller.subscribe_strategy_to_bars(strategy, ticker)
 
 
 import asyncio
