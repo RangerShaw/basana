@@ -5,8 +5,9 @@ import logging
 from basana.external.qmt import exchange as qmt_exchange
 from basana.external.qmt import position_manager
 import basana as bs
+from basana.external.qmt.limibot import Limibot
 
-from samples.strategies import bbands
+from samples.strategies import bbands, sweep_uplimit
 
 
 async def main():
@@ -25,7 +26,7 @@ async def main():
     # Connect the strategy to the bar events from the exchange.
     strategy = bbands.Strategy(event_dispatcher, period=20, std_dev=1.5)
     # exchange.subscribe_to_bar_events(pair.base_symbol, "1s", strategy.on_bar_event)
-    exchange.subscribe_to_multi_bar_events(["600157.SH", "002859.SZ", "000538.SZ"],"3s",  strategy.on_bar_event)
+    exchange.subscribe_to_multi_bar_events(["600157.SH", "002859.SZ", "000538.SZ"], "3s", strategy.on_bar_event)
 
     # We'll be using the spot account, so there will be no short positions opened.
     position_mgr = position_manager.SpotAccountPositionManager(
@@ -38,5 +39,36 @@ async def main():
     await event_dispatcher.run()
 
 
-if __name__ == "__main__":
-    asyncio.run(main())
+async def main2():
+    logging.basicConfig(level=logging.DEBUG, format="[%(asctime)s %(levelname)s] %(message)s")
+
+    checkpoint_fname = "qmt_bbands_positions.json"
+    qmt_path = 'D:\\ProgramFiles\\迅投极速策略交易系统交易终端 招商证券QMT测试37233版本\\userdata_mini'
+    account_id = '07021349'
+
+    event_dispatcher = bs.realtime_dispatcher()
+    exchange = qmt_exchange.Exchange(event_dispatcher, qmt_path, account_id)
+    limibot = Limibot(exchange)
+
+    pair = bs.Pair("600157.SH", "CNY")
+    position_amount = Decimal(100000)
+    stop_loss_pct = Decimal(5)
+
+    tickers = ["600157.SH", "002859.SZ", "000538.SZ"]
+    strategies = []
+    for ticker in tickers:
+        strategy = sweep_uplimit.Strategy(buy_point=Decimal("0.08"), sell_point=Decimal("0.95"), name="STRAT" + ticker)
+        limibot.subscribe_strategy_to_bars(strategy, ticker)
+        strategies.append(strategy)
+
+
+    # We'll be using the spot account, so there will be no short positions opened.
+    position_mgr = position_manager.SpotAccountPositionManager(
+        exchange, position_amount, pair.quote_symbol, stop_loss_pct, checkpoint_fname
+    )
+    exchange.subscribe_to_multi_bar_events(["600157.SH", "002859.SZ", "000538.SZ"], "3s", position_mgr.on_bar_event)
+
+    await event_dispatcher.run()
+
+    if __name__ == "__main__":
+        asyncio.run(main())

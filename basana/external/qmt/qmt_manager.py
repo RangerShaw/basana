@@ -115,29 +115,6 @@ class QmtClient(event.Producer, metaclass=abc.ABCMeta):
     def get_channel_event_source_ex(self, channel: Channel) -> Optional[ChannelEventSource]:
         return self._event_sources.get(channel.alias)
 
-    # async def subscribe_to_channels(self, channel_aliases: List[str], ws_cli: aiohttp.ClientWebSocketResponse):
-    #     logger.debug(logs.StructuredMessage("Subscribing", src=self, channels=channel_aliases))
-    #
-    #     # Give a chance for dynamic channels to resolve the stream name.
-    #     channels: List[Channel] = [self._alias_to_channel[alias] for alias in channel_aliases]
-    #     await asyncio.gather(*[
-    #         channel.resolve_stream_name(self._cli) for channel in channels
-    #     ])
-    #     self._stream_to_channel.update({
-    #         channel.stream: channel for channel in channels
-    #     })
-    #
-    #     msg_id = self._get_next_msg_id()
-    #     await ws_cli.send_str(json.dumps({
-    #         "id": msg_id,
-    #         "method": "SUBSCRIBE",
-    #         "params": [channel.stream for channel in channels]
-    #     }))
-    #
-    #     # Schedule keep alives.
-    #     for channel in channels:
-    #         self._schedule_keep_alive(channel)
-
     async def subscribe_to_stocks(self, channel_alias: str, tickers: List[str]):
         logger.debug(logs.StructuredMessage("Subscribing", src=self, channels=tickers))
         xtdata.subscribe_whole_quote(tickers, callback=partial(self._on_quote_datas, channel_alias))
@@ -182,23 +159,6 @@ class QmtClient(event.Producer, metaclass=abc.ABCMeta):
             except Exception as e:
                 await self.on_error(e)
 
-    # async def _msg_loop(self, ws_cli: aiohttp.ClientWebSocketResponse):
-    #     logger.debug(logs.StructuredMessage("Running message loop", src=self))
-    #
-    #     # The iterator exits normally when the connection is closed with close code 1000 (OK) or 1001 (going away).
-    #     # It raises a ConnectionClosedError when the connection is closed with any other code.
-    #     async for message in ws_cli:
-    #         handled = False
-    #         if message.type == aiohttp.WSMsgType.TEXT:
-    #             json_msg = json.loads(message.data)
-    #             handled = await self.handle_message(json_msg)
-    #         if not handled:
-    #             await self.on_unknown_message(message)
-    #
-    #     # If the message loop finished we need to notify the other tasks so they can finish as well.
-    #     self._subscribe_request.set()
-    #     self._reconnect_request.set()
-
     async def _subscribe_loop(self):
         while True:
             await self._subscribe_request.wait()
@@ -208,40 +168,6 @@ class QmtClient(event.Producer, metaclass=abc.ABCMeta):
                 for channel_alias, tickers in self._pending_subscriptions.items():
                     await self.subscribe_to_stocks(channel_alias, list(tickers))
                 self._pending_subscriptions = {}
-
-    # async def _reconnect(self, ws_cli: aiohttp.ClientWebSocketResponse):
-    #     # Will exit when reconnection is requested or when its canceled.
-    #     await self._reconnect_request.wait()
-    #     self._reconnect_request.clear()
-    #     # If the client is already closed then there is nothing left to do.
-    #     if not ws_cli.closed:
-    #         await ws_cli.close()
-
-    # async def handle_message(self, message: dict) -> bool:
-    #     coro = None
-    #
-    #     # A response to a message we sent.
-    #     if {"result", "id"} <= set(message.keys()):
-    #         coro = self._on_response(message)
-    #     # A message associated to a channel.
-    #     elif stream := message.get("stream"):
-    #         channel = self._stream_to_channel.get(stream)
-    #         assert channel, f"{stream} could not be mapped to a channel instance"
-    #         # Resubscribe to the channel if the listen key expired.
-    #         if message.get("data", {}).get("e") == "listenKeyExpired":
-    #             logger.debug(logs.StructuredMessage(
-    #                 "License key expired. Scheduling re-subscription", alias=channel.alias
-    #             ))
-    #             self.schedule_resubscription([channel.alias])
-    #         # Get the event source for the channel alias.
-    #         if event_source := self.get_channel_event_source(channel.alias):
-    #             coro = event_source.push_from_message(message)
-    #
-    #     ret = False
-    #     if coro:
-    #         await coro
-    #         ret = True
-    #     return ret
 
     def _on_quote_datas(self, channel_alias: str, datas: dict):
         if source := self._event_sources.get(channel_alias):
@@ -255,25 +181,6 @@ class QmtClient(event.Producer, metaclass=abc.ABCMeta):
         ret = self._next_msg_id
         self._next_msg_id += 1
         return ret
-
-    # def _keep_alive_channel(self, channel: Channel) -> dispatcher.SchedulerJob:
-    #     async def scheduler_job():
-    #         if self._next_keep_alive[channel.alias] <= self._dispatcher.now():
-    #             logger.debug(logs.StructuredMessage("Channel keep alive", alias=channel.alias))
-    #             try:
-    #                 await channel.keep_alive(self._cli)
-    #             finally:
-    #                 self._schedule_keep_alive(channel)
-    #
-    #     return scheduler_job
-    #
-    # def _schedule_keep_alive(self, channel: Channel):
-    #     period = channel.keep_alive_period(self._config_overrides)
-    #     if period:
-    #         schedule_dt = self._dispatcher.now() + period
-    #         logger.debug(logs.StructuredMessage("Scheduling keep alive", when=schedule_dt, alias=channel.alias))
-    #         self._next_keep_alive[channel.alias] = schedule_dt
-    #         self._dispatcher.schedule(schedule_dt, self._keep_alive_channel(channel))
 
 
 class QmtTraderCallback(XtQuantTraderCallback):

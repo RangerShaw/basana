@@ -1,4 +1,6 @@
 from abc import ABC, abstractmethod
+from typing import Optional
+
 import basana as bs
 import asyncio
 import logging
@@ -7,14 +9,14 @@ logger = logging.getLogger(__name__)
 
 
 class Strategy(ABC):
-    def __init__(self, order_controller: bs.OrderController, name: str = "", queue_size: int = 100):
+    def __init__(self, name: str = "", queue_size: int = 100):
         self.name: str = name
-        self.order_controller: bs.OrderController = order_controller
+        self.order_controller: Optional[bs.OrderController] = None
         self.data_queue = asyncio.Queue(maxsize=queue_size)
         self.task = None  # 本策略的运行协程
-        self.start()
 
-    def start(self):
+    def start(self, order_controller: bs.OrderController):
+        self.order_controller = order_controller
         if self.task is None or self.task.done():
             logger.info(f"[STRATEGY] Starting strategy {self.name}")
             self.task = asyncio.create_task(self.process_queue())

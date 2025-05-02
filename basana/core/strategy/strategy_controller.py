@@ -22,3 +22,9 @@ class StrategyController:
         else:
             self.subscriptions[ticker] = strategy
             self.strategies.append(strategy)
+
+    def start(self):
+        for strategy in self.subscriptions.values():
+            strategy.start(self.order_controller)
+
+

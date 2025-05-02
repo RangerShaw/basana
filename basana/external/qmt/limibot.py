@@ -11,8 +11,8 @@ class Limibot:
     def subscribe_strategy_to_bars(self, strategy: bs.Strategy, ticker: str):
         self.strategy_controller.subscribe_strategy_to_bars(strategy, ticker)
 
-    def run(self):
-        pass
+    def start(self):
+        self.strategy_controller.start()
 
 
 import asyncio
